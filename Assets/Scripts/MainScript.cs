@@ -48,10 +48,9 @@ public class MainScript : MonoBehaviour
     #endregion
 
     #region Network Attributes
-
-    private TcpClient client;
+    
     private Socket socket;
-    private Thread sendThread, receiveThread;
+    private Thread receiveThread;
     private bool canExit = false;
     private Semaphore sem;
     private bool loggedIn = false;
@@ -73,6 +72,7 @@ public class MainScript : MonoBehaviour
 
     void Start()
     {
+
         originTransform = gameObject.transform;
         socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         socket.SendTimeout = 5000;
@@ -99,6 +99,7 @@ public class MainScript : MonoBehaviour
         pieceNumberText.text = pieceNumberSlider.value.ToString("0");
     }
     
+    //Smoothly translate the camera
     public void TranslateCamera(Transform destination)
     {
         translationStartTime = Time.time;
@@ -106,6 +107,7 @@ public class MainScript : MonoBehaviour
         destinationTransform = destination;
     }
 
+    //Connect the client to the server
     public void Connect(Transform destination)
     {
         notificationText.enabled = false;
@@ -122,48 +124,49 @@ public class MainScript : MonoBehaviour
         }
         catch (Exception e)
         {
-            //notificationText.text = "Impossible de se connecter au serveur. Veillez à ce que l'adresse IP soit correcte.";
             notificationText.text = e.Message + " " + e.StackTrace;
             notificationText.enabled = true;
         }
 
-        /*sendThread = new Thread(new ThreadStart(SendThread));
-        sendThread.Name = "Send Thread";
-        sendThread.Start();*/
-
+        //Start the receive thread
         receiveThread = new Thread(new ThreadStart(ReceiveThread));
         receiveThread.Name = "Receive Thread";
         receiveThread.Start();
     }
 
+    //Log the player in
     public void Login(Transform destination)
     {
-        Debug.Log("will send data");
         SendData("LOGIN " + usernameText.text);
-        Debug.Log("data sent");
         sem.WaitOne();
-        Debug.Log("got the semaphore");
         if (loggedIn)
             TranslateCamera(destination);
     }
 
+    //Create the game
     public void CreatePartie(Transform destination)
     {
         notificationText.enabled = false;
+        
         SendData("NEW__ " + gridSizeSlider.value + " " + pieceNumberSlider.value + " " + playerNumberSlider.value);
+        
         sem.WaitOne();
         TranslateCamera(destination);
     }
 
+    //Join a game
     public void JoindrePartie(Transform destination)
     {
-        //notificationText.enabled = false;
+        notificationText.enabled = false;
+        
         SendData("JOIN_ " + joinGameIDText.text);
+        
         sem.WaitOne();
         if (waitingForTheGame)
             TranslateCamera(destination);
     }
 
+    //Create the grid
     public void StartGame()
     {
         GridLayoutGroup gridLayoutGroup = panel.GetComponent<GridLayoutGroup>();
@@ -186,6 +189,7 @@ public class MainScript : MonoBehaviour
         TranslateCamera(gameTransform);
     }
 
+    //Update the grid (deactivate the taken cells)
     private void UpdateGrid(string[] data)
     {
         for (int i = 0; i < taille; i++)
@@ -198,6 +202,7 @@ public class MainScript : MonoBehaviour
         }
     }
 
+    //Send a command to the server through the network
     public void SendData(string command)
     {
         try
@@ -211,6 +216,7 @@ public class MainScript : MonoBehaviour
         }
     }
 
+    //Thread that execute thing when receiving a command from the server. See the Protocol Specifications for more informations about returned codes
     public void ReceiveThread()
     {
         byte[] buffer;
@@ -330,6 +336,7 @@ public class MainScript : MonoBehaviour
         }
     }
 
+    //Coroutine that show the last information or error
     private IEnumerator ShowMessage(string message, int duration)
     {
         notificationText.text = message;
@@ -340,6 +347,7 @@ public class MainScript : MonoBehaviour
         notificationText.enabled = false;
     }
 
+    //When leaving the client, check if the thread is running in order to stap it.
     void OnApplicationQuit()
     {
         if (receiveThread != null)
