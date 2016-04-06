@@ -15,26 +15,33 @@ public class MainScript : MonoBehaviour
     #region UI Attributes
 
     //Game settings sliders
-    [HideInInspector] public Slider playerNumberSlider;
-    [HideInInspector] public Slider pieceNumberSlider;
-    [HideInInspector] public Slider gridSizeSlider;
+    public Slider playerNumberSlider;
+    public Slider pieceNumberSlider;
+    public Slider gridSizeSlider;
 
     //Game settings texts
-    [HideInInspector] public Text playerNumberText;
-    [HideInInspector] public Text gridSizeText;
-    [HideInInspector] public Text pieceNumberText;
+    public Text playerNumberText;
+    public Text gridSizeText;
+    public Text pieceNumberText;
 
-    [HideInInspector] public Text errorText;
+    //The notification UI
+    public Text notificationText;
     
+    //Other stuff
+    public Text IdGameText;
     public Text ipAddressText;
+    public Text endText;
+    public Text usernameText;
+    public Text joinGameIDText;
     public GameObject casePrefab;
 
     //For translating the camera
     private float translationStartTime = 0f;
     private Transform originTransform;
-    private Transform destinationTransform;      //Also the point to start (so that's why it is public)
+    private Transform destinationTransform;
     public Transform startTransform;
     public Transform endTransform;
+    public Transform gameTransform;
 
     public float translationSpeed = 5f;
 
@@ -47,6 +54,8 @@ public class MainScript : MonoBehaviour
     private Thread sendThread, receiveThread;
     private bool canExit = false;
     private Semaphore sem;
+    private bool loggedIn = false;
+    private bool waitingForTheGame = false;
 
     #endregion
 
@@ -54,7 +63,7 @@ public class MainScript : MonoBehaviour
 
     private bool begun = false;
     private bool caseOccupee;
-    private int taille;
+    public int taille = 5;
 
     private GameObject[] grid;
 
@@ -66,6 +75,7 @@ public class MainScript : MonoBehaviour
     {
         originTransform = gameObject.transform;
         socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        socket.SendTimeout = 5000;
         sem = new Semaphore(0, 1);
         destinationTransform = startTransform;
     }
@@ -98,7 +108,7 @@ public class MainScript : MonoBehaviour
 
     public void Connect(Transform destination)
     {
-        errorText.enabled = false;
+        notificationText.enabled = false;
 
         try
         {
@@ -112,9 +122,9 @@ public class MainScript : MonoBehaviour
         }
         catch (Exception e)
         {
-            //errorText.text = "Impossible de se connecter au serveur. Veillez à ce que l'adresse IP soit correcte.";
-            errorText.text = e.Message + " " + e.StackTrace;
-            errorText.enabled = true;
+            //notificationText.text = "Impossible de se connecter au serveur. Veillez à ce que l'adresse IP soit correcte.";
+            notificationText.text = e.Message + " " + e.StackTrace;
+            notificationText.enabled = true;
         }
 
         /*sendThread = new Thread(new ThreadStart(SendThread));
@@ -126,20 +136,35 @@ public class MainScript : MonoBehaviour
         receiveThread.Start();
     }
 
-    public void CreatePartie()
+    public void Login(Transform destination)
     {
-        errorText.enabled = false;
+        Debug.Log("will send data");
+        SendData("LOGIN " + usernameText.text);
+        Debug.Log("data sent");
+        sem.WaitOne();
+        Debug.Log("got the semaphore");
+        if (loggedIn)
+            TranslateCamera(destination);
+    }
+
+    public void CreatePartie(Transform destination)
+    {
+        notificationText.enabled = false;
         SendData("NEW__ " + gridSizeSlider.value + " " + pieceNumberSlider.value + " " + playerNumberSlider.value);
         sem.WaitOne();
+        TranslateCamera(destination);
     }
 
-    public void JoindrePartie(Text field)
+    public void JoindrePartie(Transform destination)
     {
-        errorText.enabled = false;
-        SendData("JOIN_ " + field.text);
+        //notificationText.enabled = false;
+        SendData("JOIN_ " + joinGameIDText.text);
+        sem.WaitOne();
+        if (waitingForTheGame)
+            TranslateCamera(destination);
     }
 
-    private void StartGame()
+    public void StartGame()
     {
         GridLayoutGroup gridLayoutGroup = panel.GetComponent<GridLayoutGroup>();
         gridLayoutGroup.cellSize = new Vector2(300/taille, 300/taille);
@@ -157,6 +182,8 @@ public class MainScript : MonoBehaviour
                 grid[i*taille + j] = tmpCase;
             }
         }
+
+        TranslateCamera(gameTransform);
     }
 
     private void UpdateGrid(string[] data)
@@ -179,19 +206,21 @@ public class MainScript : MonoBehaviour
         }
         catch (Exception e)
         {
-            errorText.text = e.Message + " " + e.StackTrace;
-            errorText.enabled = true;
+            notificationText.text = e.Message + " " + e.StackTrace;
+            notificationText.enabled = true;
         }
     }
 
     public void ReceiveThread()
     {
-        byte[] buffer = new byte[2048];
+        byte[] buffer;
         string[] data;
         while (!canExit)
         {
+            buffer = new byte[2048];
             socket.Receive(buffer);
-            data = buffer.ToString().Split(' ');
+            data = System.Text.Encoding.Default.GetString(buffer).Split(' ');
+            Debug.Log(System.Text.Encoding.Default.GetString(buffer));
 
             switch (data[0])
             {
@@ -199,12 +228,12 @@ public class MainScript : MonoBehaviour
                     StartCoroutine(ShowMessage(data[1], 7));
                     break;
                 case "101":
-                    StopCoroutine("ShowMessage");
-                    StartCoroutine(ShowMessage("ID partie : " + data[1] + ".", 7));
+                    IdGameText.text = "ID de la partie créée : " + data[1];
+                    sem.Release();
                     break;
                 case "102":
-                    StopCoroutine("ShowMessage");
-                    StartCoroutine(ShowMessage("Partie remportée par le joueur " + data[1] + ".", 20));
+                    TranslateCamera(endTransform);
+                    endText.text = "Partie remportée par le joueur " + data[1] + ".";
                     break;
                 case "103":
                     StopCoroutine("ShowMessage");
@@ -217,15 +246,15 @@ public class MainScript : MonoBehaviour
                 case "105":
                     if (!begun && data[1] == "true")
                     {
-                            begun = true;
-                            StartGame();
+                        begun = true;
+                        StartGame();
                     }
                     sem.Release();
                     break;
                 case "106":
                     StopCoroutine("ShowMessage");
-                    StartCoroutine(ShowMessage("Partie annulée.", 20));
-                    //TranslateCamera();
+                    endText.text = "Partie annulée";
+                    TranslateCamera(endTransform);
                     break;
                 case "107":
                     StopCoroutine("ShowMessage");
@@ -234,6 +263,13 @@ public class MainScript : MonoBehaviour
                 case "108":
                     UpdateGrid(data);
                     break;
+                case "109":
+                    loggedIn = true;
+                    sem.Release();
+                    break;
+                case "110":
+                    sem.Release();
+                    break;
                 case "200":
                     StopCoroutine("ShowMessage");
                     StartCoroutine(ShowMessage("Erreur serveur : " + data[1] + ".", 7));
@@ -241,10 +277,12 @@ public class MainScript : MonoBehaviour
                 case "201":
                     StopCoroutine("ShowMessage");
                     StartCoroutine(ShowMessage("Problème dans les paramètres de la partie.", 7));
+
                     break;
                 case "202":
                     StopCoroutine("ShowMessage");
                     StartCoroutine(ShowMessage("Case hors de la grille.", 3));
+                    sem.Release();
                     break;
                 case "203":
                     StopCoroutine("ShowMessage");
@@ -253,10 +291,12 @@ public class MainScript : MonoBehaviour
                 case "204":
                     StopCoroutine("ShowMessage");
                     StartCoroutine(ShowMessage("La partie est déjà complete.", 7));
+                    sem.Release();
                     break;
                 case "205":
                     StopCoroutine("ShowMessage");
                     StartCoroutine(ShowMessage("Partie inexistante", 7));
+                    sem.Release();
                     break;
                 case "206":
                     StopCoroutine("ShowMessage");
@@ -264,19 +304,21 @@ public class MainScript : MonoBehaviour
                     break;
                 case "207":
                     StopCoroutine("ShowMessage");
-                    StartCoroutine(ShowMessage("Vous n'êtes pas autorisé à accéder à cette partie.", 7));
+                    StartCoroutine(ShowMessage("Nom d'utilisateur déjà utilisé", 7));
+                    sem.Release();
                     break;
                 case "208":
                     StopCoroutine("ShowMessage");
-                    StartCoroutine(ShowMessage("Vous n'êtes pas autorisé à accéder à cette partie.", 7));
+                    StartCoroutine(ShowMessage("Le nom d'utilisateur contient des caractères incorrects.", 7));
+                    sem.Release();
                     break;
                 case "209":
                     StopCoroutine("ShowMessage");
-                    StartCoroutine(ShowMessage("Vous n'êtes pas autorisé à accéder à cette partie.", 7));
+                    StartCoroutine(ShowMessage("Ce n'est pas votre tour", 7));
                     break;
                 case "210":
                     StopCoroutine("ShowMessage");
-                    StartCoroutine(ShowMessage("Vous n'êtes pas autorisé à accéder à cette partie.", 7));
+                    StartCoroutine(ShowMessage(data[1], 10));
                     break;
                 case "300":
                     StopCoroutine("ShowMessage");
@@ -290,11 +332,19 @@ public class MainScript : MonoBehaviour
 
     private IEnumerator ShowMessage(string message, int duration)
     {
-        errorText.text = message;
-        errorText.enabled = true;
+        notificationText.text = message;
+        notificationText.enabled = true;
 
         yield return new WaitForSeconds(duration);
 
-        errorText.enabled = false;
+        notificationText.enabled = false;
+    }
+
+    void OnApplicationQuit()
+    {
+        if (receiveThread != null)
+        {
+            receiveThread.Abort();
+        }
     }
 }
